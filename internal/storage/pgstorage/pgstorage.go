@@ -3,6 +3,7 @@ package pgstorage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -71,20 +72,13 @@ func (p *PgxStore) WriteUser(ctx context.Context, data model.UserInfo) error {
 }
 
 // Чтение данных пользователя
-func (p *PgxStore) ReadUsers(ctx context.Context, userIDs ...string) (res []model.UserInfo, err error) {
-	res = make([]model.UserInfo, 0)
-	query := `SELECT * FROM users`
+func (p *PgxStore) ReadUser(ctx context.Context, userID string) (res model.UserInfo, err error) {
+	query := `
+		SELECT * FROM users
+		WHERE user_id = $1 LIMIT 1`
 
-	if len(userIDs) == 0 {
-		err = p.db.SelectContext(ctx, &res, query)
-	} else {
-		var args []any
-		query, args, err = sqlx.In(query+`
-			WHERE user_id IN (?) LIMIT ?`, userIDs, len(userIDs))
-		if err != nil {
-			return nil, err
-		}
-		err = p.db.SelectContext(ctx, &res, p.db.Rebind(query), args...)
+	if err = p.db.GetContext(ctx, &res, query, userID); err != nil {
+		err = errNoContent(err)
 	}
 	return
 }
@@ -156,7 +150,7 @@ func (p *PgxStore) ReadOrdersWithStatus(ctx context.Context, status []string, li
 }
 
 // Запись сведений о лояльности
-func (p *PgxStore) WriteLoyalty(ctx context.Context, data []model.LoyaltyInfo) error {
+func (p *PgxStore) WriteOperations(ctx context.Context, data []model.OperationsInfo) error {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -165,7 +159,7 @@ func (p *PgxStore) WriteLoyalty(ctx context.Context, data []model.LoyaltyInfo) e
 
 	// добавление записи о заказе
 	query := `
-		INSERT INTO loyalty (user_id, order_id, is_accrual, points, uploaded_at) 
+		INSERT INTO operations (user_id, order_id, is_accrual, points, uploaded_at) 
 		VALUES(:user_id, :order_id, :is_accrual, :points, :uploaded_at);`
 	if _, err = tx.NamedExecContext(ctx, query, data); err != nil {
 		return err
@@ -174,44 +168,35 @@ func (p *PgxStore) WriteLoyalty(ctx context.Context, data []model.LoyaltyInfo) e
 }
 
 // читаем данные лояльности
-func (p *PgxStore) ReadLoyalty(ctx context.Context, userID string, accrual bool) (res []model.LoyaltyInfo, err error) {
-	res = make([]model.LoyaltyInfo, 0)
+func (p *PgxStore) ReadOperations(ctx context.Context, userID string, isAccrual bool) (res []model.OperationsInfo, err error) {
+	res = make([]model.OperationsInfo, 0)
 
 	query := `
-		SELECT * FROM loyalty 
+		SELECT * FROM operations 
 		WHERE user_id = $1 AND is_accrual = $2;`
-	err = p.db.SelectContext(ctx, &res, query, userID, accrual)
+	err = p.db.SelectContext(ctx, &res, query, userID, isAccrual)
 
 	return
 }
 
 // читаем баланс пользователя
-func (p *PgxStore) ReadBalances(ctx context.Context, userIDs ...string) (res []model.BalanceInfo, err error) {
-	res = make([]model.BalanceInfo, 0)
+func (p *PgxStore) ReadBalance(ctx context.Context, userID string) (res model.BalanceInfo, err error) {
 	query := `
 		SELECT
 			user_id,
 			SUM(CASE WHEN is_accrual THEN points ELSE -points END) AS current,
 			SUM(CASE WHEN is_accrual THEN 0 ELSE points END) AS withdrawn 
-		FROM loyalty %s
+		FROM operations WHERE user_id = $1
 		GROUP BY user_id;`
 
-	if len(userIDs) == 0 {
-		err = p.db.SelectContext(ctx, &res, fmt.Sprintf(query, ""))
-	} else {
-		var args []any
-		query, args, err = sqlx.In(fmt.Sprintf(query, `WHERE user_id IN (?)`),
-			userIDs)
-		if err != nil {
-			return nil, err
-		}
-		err = p.db.SelectContext(ctx, &res, p.db.Rebind(query), args...)
+	if err = p.db.GetContext(ctx, &res, query, userID); err != nil {
+		err = errNoContent(err)
 	}
 	return
 }
 
 // Обновление сведений заказа, добавление записей о начислении скидок
-func (p *PgxStore) UpdateOrders(ctx context.Context, orders []model.OrderInfo, accrues []model.LoyaltyInfo) error {
+func (p *PgxStore) UpdateOrderAccrual(ctx context.Context, order model.OrderInfo, accrual int) error {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil
@@ -221,18 +206,21 @@ func (p *PgxStore) UpdateOrders(ctx context.Context, orders []model.OrderInfo, a
 	query := `
 		UPDATE orders SET user_id=:user_id, status=:status, uploaded_at=:uploaded_at  
 		WHERE order_id = :order_id;`
-	for _, o := range orders {
-		_, err = tx.NamedExecContext(ctx, query, o)
-		if err != nil {
-			return err
-		}
+	_, err = tx.NamedExecContext(ctx, query, order)
+	if err != nil {
+		return err
 	}
 
-	query = `
-		INSERT INTO loyalty (user_id, order_id, is_accrual, points, uploaded_at) 
-		VALUES(:user_id, :order_id, :is_accrual, :points, :uploaded_at);`
-	for _, a := range accrues {
-		_, err = tx.NamedExecContext(ctx, query, a)
+	if accrual != 0 {
+		query = `
+			INSERT INTO operations (user_id, order_id, is_accrual, points, uploaded_at) 
+			VALUES(:user_id, :order_id, :is_accrual, :points, :uploaded_at);`
+		_, err = tx.NamedExecContext(ctx, query, model.OperationsInfo{
+			UserID:    order.UserID,
+			OrderID:   order.OrderID,
+			IsAccrual: true,
+			Points:    accrual,
+		})
 		if err != nil {
 			return err
 		}
@@ -260,15 +248,15 @@ func createTablesIfNonExists(db *sqlx.DB) error {
 		CREATE INDEX IF NOT EXISTS status_idx 
 		ON orders (status);
 
-		CREATE TABLE IF NOT EXISTS loyalty (
-			user_id VARCHAR (100) NOT NULL,
-			order_id       BIGINT NOT NULL,
-			is_accrual     BOOL NOT NULL,
-			points numeric(15, 2) NOT NULL,
-			uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL
+		CREATE TABLE IF NOT EXISTS operations (
+			user_id 	VARCHAR (100) NOT NULL,
+			order_id	BIGINT NOT NULL,
+			is_accrual	BOOL NOT NULL,
+			points		INTEGER NOT NULL,
+			uploaded_at	TIMESTAMP WITH TIME ZONE NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS user_idx 
-		ON loyalty (user_id);
+		ON operations (user_id);
 		`
 	_, err := db.Exec(query)
 	return err
@@ -282,6 +270,17 @@ func errWriteConflict(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgerrcode.IsIntegrityConstraintViolation(pgErr.Code) {
 		return storage.ErrWriteConflict
+	}
+	return err
+}
+
+func errNoContent(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.ErrNoContent
 	}
 	return err
 }

@@ -16,9 +16,10 @@ type Configuration struct {
 	LogLevel string `env:"LOG_LEVEL"`      // уровень логирования
 }
 
-var config Configuration
+// Возвращаем копию конфигурации полученную из флагов и окружения
+func Config() Configuration {
+	var config Configuration
 
-func init() {
 	// устанавливаем переменные для флага по умолчанию
 	flag.StringVar(&config.ServAddr, "a", "localhost:8080", "server address")
 	flag.IntVar(&config.Timeout, "t", 30, "timeout in seconds")
@@ -31,9 +32,5 @@ func init() {
 	// получаем конфигурацию из флагов и/или окружения
 	flag.Parse()
 	env.Parse(&config)
-}
-
-// Возвращаем копию конфигурации полученную из флагов и окружения
-func Config() Configuration {
 	return config
 }

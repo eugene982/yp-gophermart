@@ -10,10 +10,10 @@ import (
 )
 
 type MemStore struct {
-	mx      sync.Mutex
-	users   map[string]model.UserInfo
-	orders  map[int64]model.OrderInfo
-	loyalty []model.LoyaltyInfo
+	mx         sync.Mutex
+	users      map[string]model.UserInfo
+	orders     map[int64]model.OrderInfo
+	operations []model.OperationsInfo
 }
 
 // Утверждение типа, ошибка компиляции
@@ -22,9 +22,9 @@ var _ storage.Storage = (*MemStore)(nil)
 // конструктор нового хранилища
 func New() *MemStore {
 	return &MemStore{
-		users:   make(map[string]model.UserInfo),
-		orders:  make(map[int64]model.OrderInfo),
-		loyalty: make([]model.LoyaltyInfo, 0),
+		users:      make(map[string]model.UserInfo),
+		orders:     make(map[int64]model.OrderInfo),
+		operations: make([]model.OperationsInfo, 0),
 	}
 }
 
@@ -61,27 +61,18 @@ func (m *MemStore) WriteUser(ctx context.Context, data model.UserInfo) error {
 }
 
 // Чтение списка пользователей
-func (m *MemStore) ReadUsers(ctx context.Context, userIDs ...string) (res []model.UserInfo, err error) {
+func (m *MemStore) ReadUser(ctx context.Context, userID string) (res model.UserInfo, err error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return res, ctx.Err()
 	default:
 	}
 	m.mx.Lock()
 	defer m.mx.Unlock()
 
-	res = make([]model.UserInfo, 0)
-
-	if len(userIDs) == 0 {
-		for _, v := range m.users {
-			res = append(res, v)
-		}
-	} else {
-		for _, id := range userIDs {
-			if v, ok := m.users[id]; ok {
-				res = append(res, v)
-			}
-		}
+	res, ok := m.users[userID]
+	if !ok {
+		err = storage.ErrNoContent
 	}
 	return
 }
@@ -136,7 +127,7 @@ func (m *MemStore) ReadOrders(ctx context.Context, userID string, nums ...int64)
 }
 
 // запись начисления и списания баллов лояльности
-func (m *MemStore) WriteLoyalty(ctx context.Context, data []model.LoyaltyInfo) error {
+func (m *MemStore) WriteOperations(ctx context.Context, data []model.OperationsInfo) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -145,12 +136,12 @@ func (m *MemStore) WriteLoyalty(ctx context.Context, data []model.LoyaltyInfo) e
 	m.mx.Lock()
 	defer m.mx.Unlock()
 
-	m.loyalty = append(m.loyalty, data...)
+	m.operations = append(m.operations, data...)
 	return nil
 }
 
 // чтение лояльности
-func (m *MemStore) ReadLoyalty(ctx context.Context, userID string, accrual bool) ([]model.LoyaltyInfo, error) {
+func (m *MemStore) ReadOperations(ctx context.Context, userID string, isAccrual bool) ([]model.OperationsInfo, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -159,9 +150,9 @@ func (m *MemStore) ReadLoyalty(ctx context.Context, userID string, accrual bool)
 	m.mx.Lock()
 	defer m.mx.Unlock()
 
-	res := make([]model.LoyaltyInfo, 0)
-	for _, v := range m.loyalty {
-		if v.UserID == userID && v.IsAccrual == accrual {
+	res := make([]model.OperationsInfo, 0)
+	for _, v := range m.operations {
+		if v.UserID == userID && v.IsAccrual == isAccrual {
 			res = append(res, v)
 		}
 	}
@@ -169,35 +160,27 @@ func (m *MemStore) ReadLoyalty(ctx context.Context, userID string, accrual bool)
 }
 
 // чтение баланса
-func (m *MemStore) ReadBalances(ctx context.Context, userIDs ...string) ([]model.BalanceInfo, error) {
+func (m *MemStore) ReadBalance(ctx context.Context, userID string) (res model.BalanceInfo, err error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return res, ctx.Err()
 	default:
 	}
 	m.mx.Lock()
 	defer m.mx.Unlock()
 
-	userBalense := make(map[string]model.BalanceInfo)
-	for _, l := range m.loyalty {
-		if !hasValue(l.UserID, userIDs) {
+	for _, l := range m.operations {
+		if l.UserID != userID {
 			continue
 		}
-		b := userBalense[l.UserID]
 		if l.IsAccrual {
-			b.Current += l.Points
+			res.Current += l.Points
 		} else {
-			b.Withdrawn += l.Points
-			b.Current -= l.Points
+			res.Withdrawn += l.Points
+			res.Current -= l.Points
 		}
-		userBalense[l.UserID] = b
 	}
-
-	res := make([]model.BalanceInfo, 0, len(userBalense))
-	for _, b := range userBalense {
-		res = append(res, b)
-	}
-	return res, nil
+	return
 }
 
 // чтение заказов указанных статусов
@@ -224,7 +207,7 @@ func (m *MemStore) ReadOrdersWithStatus(ctx context.Context, status []string, li
 }
 
 // обновление заказов
-func (m *MemStore) UpdateOrders(ctx context.Context, orders []model.OrderInfo, accrues []model.LoyaltyInfo) error {
+func (m *MemStore) UpdateOrderAccrual(ctx context.Context, order model.OrderInfo, accrual int) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -233,16 +216,19 @@ func (m *MemStore) UpdateOrders(ctx context.Context, orders []model.OrderInfo, a
 	m.mx.Lock()
 	defer m.mx.Unlock()
 
-	for _, o := range orders {
-		if _, ok := m.orders[o.OrderID]; !ok {
-			return fmt.Errorf("error update order %d, not found", o.OrderID)
-		}
+	if _, ok := m.orders[order.OrderID]; !ok {
+		return fmt.Errorf("error update order %d, not found", order.OrderID)
 	}
-	for _, o := range orders {
-		m.orders[o.OrderID] = o
-	}
+	m.orders[order.OrderID] = order
 
-	m.loyalty = append(m.loyalty, accrues...)
+	if accrual != 0 {
+		m.operations = append(m.operations, model.OperationsInfo{
+			UserID:    order.UserID,
+			OrderID:   order.OrderID,
+			IsAccrual: true,
+			Points:    accrual,
+		})
+	}
 	return nil
 }
 

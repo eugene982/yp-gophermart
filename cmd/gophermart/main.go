@@ -4,19 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/eugene982/yp-gophermart/internal/application"
 	"github.com/eugene982/yp-gophermart/internal/config"
 	"github.com/eugene982/yp-gophermart/internal/logger"
-	"github.com/eugene982/yp-gophermart/internal/storage"
-	"github.com/eugene982/yp-gophermart/internal/storage/memstore"
-	"github.com/eugene982/yp-gophermart/internal/storage/pgstorage"
 )
 
 const (
@@ -46,78 +40,45 @@ func run() (err error) {
 	}()
 
 	// захват прерывания процесса
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctxInterrupt, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	conf := config.Config()
-
-	// установка соединения БД
-	var store storage.Storage
-	if conf.DatabaseDSN == "" {
-		store = memstore.New()
-	} else {
-		var db *sqlx.DB
-		db, err = sqlx.Open("pgx", conf.DatabaseDSN)
-		if err != nil {
-			return
-		}
-		store, err = pgstorage.New(db)
-		if err != nil {
-			return
-		}
-	}
-
-	// клиент, который опрашивает внешний ресурс
-	client := &http.Client{
-		Timeout: time.Second * time.Duration(conf.Timeout),
-	}
-
-	// создание приложения
-	app, err := application.New(conf.AccrualSystemAddress, store, client)
+	app, err := application.New(conf)
 	if err != nil {
+		err = fmt.Errorf("error create server: %w", err)
 		return
 	}
 
-	server := &http.Server{
-		Addr:         conf.ServAddr,
-		WriteTimeout: time.Second * time.Duration(conf.Timeout),
-		ReadTimeout:  time.Second * time.Duration(conf.Timeout),
-		Handler:      app.NewRouter(),
+	// запуск сервера
+	if err = app.Start(); err != nil {
+		err = fmt.Errorf("error start server: %w", err)
+		return
 	}
-
-	// запуск сервера в горутине
-	srvErr := make(chan error)
-
 	logger.Info("application start", "config", conf)
-	go func() {
-		srvErr <- server.ListenAndServe()
-	}()
 
-	// ждём что раньше случится, ошибка старта сервера
-	// или пользователь прервёт программу
-	select {
-	case <-ctx.Done():
-		// прервано пользователем
-	case e := <-srvErr:
-		// сервер не смог стартануть, некорректый адрес, занят порт...
-		// эту ошибку логируем отдельно. В любом случае, нужно освободить ресурсы
-		logger.Error(fmt.Errorf("error start server: %w", e))
-	}
+	// ждём пока пользователь прервёт программу
+	<-ctxInterrupt.Done()
 
 	// стартуем завершение сервера
+	closeErr := make(chan error)
 	go func() {
-		srvErr <- app.Close()
-		server.Close() // последним, придёт ErrServerClosed
+		closeErr <- app.Close()
 	}()
 
 	// Ждём пока сервер сам завершится
 	// или за отведённое время
-	waitClose := time.NewTicker(closeServerTimeout)
+
+	ctxTimeout, stop := context.WithTimeout(context.Background(), closeServerTimeout)
+	defer stop()
 
 	select {
-	case <-waitClose.C:
-		logger.Info("stop server on timeout")
-	case err = <-srvErr:
+	case <-ctxTimeout.Done():
+		logger.Warn("stop server on timeout")
+	case e := <-closeErr:
+		if e != nil {
+			err = e
+		}
 		logger.Info("stop server gracefull")
 	}
 	return

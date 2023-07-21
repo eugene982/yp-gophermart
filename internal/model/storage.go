@@ -19,17 +19,17 @@ type OrderInfo struct {
 }
 
 // структура записи данных дояльности
-type LoyaltyInfo struct {
+type OperationsInfo struct {
 	UserID     string    `db:"user_id"`
 	OrderID    int64     `db:"order_id"`
 	IsAccrual  bool      `db:"is_accrual"`
-	Points     float32   `db:"points"`
+	Points     int       `db:"points"` // *100
 	UploadedAt time.Time `db:"uploaded_at"`
 }
 
 // структура ответа баланса баллов
 type BalanceInfo struct {
-	UserID    string  `db:"user_id"`
-	Current   float32 `db:"current"`
-	Withdrawn float32 `db:"withdrawn"`
+	UserID    string `db:"user_id"`
+	Current   int    `db:"current"`   // *100
+	Withdrawn int    `db:"withdrawn"` //*100
 }

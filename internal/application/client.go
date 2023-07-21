@@ -15,12 +15,9 @@ import (
 )
 
 var (
-	accrueReqestDuration = time.Second * 5
-	updateOrders         = []string{"NEW", "REGISTERED", "PROCESSING"}
-	updateLimit          = 10
+	updateOrders       = []string{"NEW", "REGISTERED", "PROCESSING"}
+	errTooManyRequests = errors.New("too many requests")
 )
-
-var errTooManyRequests = errors.New("too many requests")
 
 func (a *Application) startAccrualReqestAsync() {
 	ticker := time.NewTicker(accrueReqestDuration)
@@ -29,22 +26,19 @@ func (a *Application) startAccrualReqestAsync() {
 
 		logger.Info("start reqest accrual", "address", a.accrualSystem)
 		ctx := context.Background()
-		err := a.accuralRequest(ctx)
+		err := a.updateOrdersStatuses(ctx)
 		logger.Info("end request accrual", "error", err)
 
 	}
 }
 
 // Опрос сервиса начисления бонусов
-func (a *Application) accuralRequest(ctx context.Context) error {
+func (a *Application) updateOrdersStatuses(ctx context.Context) error {
 
-	orders, err := a.storage.ReadOrdersWithStatus(ctx, updateOrders, updateLimit)
+	orders, err := a.storage.ReadOrdersWithStatus(ctx, updateOrders, updateOrderLimit)
 	if err != nil {
 		return err
 	}
-
-	updOrders := make([]model.OrderInfo, 0)
-	updAccruals := make([]model.LoyaltyInfo, 0)
 
 	for _, o := range orders {
 		resp, err := a.accrualRequestOrder(ctx, o.OrderID)
@@ -58,19 +52,11 @@ func (a *Application) accuralRequest(ctx context.Context) error {
 		}
 
 		o.Status = strings.ToUpper(resp.Status)
-		updOrders = append(updOrders, o)
+		accrual := int(resp.Accrual * 100)
+		a.storage.UpdateOrderAccrual(ctx, o, accrual)
 
-		if resp.Accrual >= 0.01 || resp.Accrual <= -0.01 {
-			updAccruals = append(updAccruals, model.LoyaltyInfo{
-				UserID:     o.UserID,
-				OrderID:    o.OrderID,
-				IsAccrual:  true,
-				Points:     resp.Accrual,
-				UploadedAt: time.Now(),
-			})
-		}
 	}
-	return a.storage.UpdateOrders(ctx, updOrders, updAccruals)
+	return nil
 }
 
 // запрос к внешней системе по отдельному заказу

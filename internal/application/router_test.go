@@ -41,7 +41,7 @@ func TestRouterMethods(t *testing.T) {
 
 	app := newMocApplication(t)
 	defer app.Close()
-	router := app.NewRouter()
+	router := newRouter(app)
 
 	for _, tcase := range tests {
 		t.Run(tcase.method, func(t *testing.T) {
@@ -349,8 +349,8 @@ func TestApplication_getOrdersHandler(t *testing.T) {
 		UserID: "user2", OrderID: 12345678903, Status: "NEW", UploadedAt: time.Date(2000, 12, 31, 0, 0, 0, 0, time.UTC)})
 	require.NoError(t, err)
 
-	err = app.storage.WriteLoyalty(context.TODO(), []model.LoyaltyInfo{{UserID: "user2", OrderID: 12345678903,
-		IsAccrual: true, Points: 505.05, UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC),
+	err = app.storage.WriteOperations(context.TODO(), []model.OperationsInfo{{UserID: "user2", OrderID: 12345678903,
+		IsAccrual: true, Points: 50505, UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC),
 	}})
 	require.NoError(t, err)
 
@@ -447,10 +447,10 @@ func TestApplication_getBalanceHandler(t *testing.T) {
 		Status: "PROCESSED", UploadedAt: time.Date(2000, 12, 31, 0, 0, 0, 0, time.UTC)})
 	require.NoError(t, err)
 
-	err = app.storage.WriteLoyalty(context.TODO(), []model.LoyaltyInfo{
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 505.05,
+	err = app.storage.WriteOperations(context.TODO(), []model.OperationsInfo{
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 50505,
 			UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC)},
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 100.0,
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 10000,
 			UploadedAt: time.Date(2000, 12, 31, 2, 0, 0, 0, time.UTC)},
 	})
 	require.NoError(t, err)
@@ -539,10 +539,10 @@ func TestApplication_withdrawHandler(t *testing.T) {
 		Status: "PROCESSED", UploadedAt: time.Date(2000, 12, 31, 0, 0, 0, 0, time.UTC)})
 	require.NoError(t, err)
 
-	err = app.storage.WriteLoyalty(context.TODO(), []model.LoyaltyInfo{
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 505.05,
+	err = app.storage.WriteOperations(context.TODO(), []model.OperationsInfo{
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 50505,
 			UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC)},
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 100.0,
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 10000,
 			UploadedAt: time.Date(2000, 12, 31, 2, 0, 0, 0, time.UTC)},
 	})
 	require.NoError(t, err)
@@ -644,10 +644,10 @@ func TestApplication_getWithdrawalsHandler(t *testing.T) {
 		Status: "PROCESSED", UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC)})
 	require.NoError(t, err)
 
-	err = app.storage.WriteLoyalty(context.TODO(), []model.LoyaltyInfo{
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 505.05,
+	err = app.storage.WriteOperations(context.TODO(), []model.OperationsInfo{
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: true, Points: 50505,
 			UploadedAt: time.Date(2000, 12, 31, 1, 0, 0, 0, time.UTC)},
-		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 100.0,
+		{UserID: "user1", OrderID: 12345678903, IsAccrual: false, Points: 10000,
 			UploadedAt: time.Date(2000, 12, 31, 2, 0, 0, 0, time.UTC)},
 	})
 	require.NoError(t, err)
