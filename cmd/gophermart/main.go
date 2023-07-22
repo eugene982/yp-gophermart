@@ -46,19 +46,26 @@ func run() (err error) {
 	conf := config.Config()
 	app, err := application.New(conf)
 	if err != nil {
-		err = fmt.Errorf("error create server: %w", err)
 		return
 	}
 
-	// запуск сервера
-	if err = app.Start(); err != nil {
-		err = fmt.Errorf("error start server: %w", err)
-		return
-	}
+	// запуск сервера в горутине
+	srvErr := make(chan error)
+	go func() {
+		srvErr <- app.Start()
+	}()
 	logger.Info("application start", "config", conf)
 
-	// ждём пока пользователь прервёт программу
-	<-ctxInterrupt.Done()
+	// ждём что раньше случится, ошибка старта сервера
+	// или пользователь прервёт программу
+	select {
+	case <-ctxInterrupt.Done():
+		// прервано пользователем
+	case e := <-srvErr:
+		// сервер не смог стартануть, некорректый адрес, занят порт...
+		// эту ошибку логируем отдельно. В любом случае, нужно освободить ресурсы
+		logger.Error(fmt.Errorf("error start server: %w", e))
+	}
 
 	// стартуем завершение сервера
 	closeErr := make(chan error)
@@ -68,7 +75,6 @@ func run() (err error) {
 
 	// Ждём пока сервер сам завершится
 	// или за отведённое время
-
 	ctxTimeout, stop := context.WithTimeout(context.Background(), closeServerTimeout)
 	defer stop()
 

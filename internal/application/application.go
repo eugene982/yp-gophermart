@@ -16,9 +16,13 @@ import (
 
 const (
 	// подмешиваем в пароль при получении хеша
-	passwordSalt         = "YandexPracticumSalt"
+	passwordSalt = "YandexPracticumSalt"
+
+	// период между опросами внешнего сервиса
 	accrueReqestDuration = time.Second * 5
-	updateOrderLimit     = 10
+
+	// Количество заказов для обновления, получаемые из БД
+	updateOrderLimit = 10
 )
 
 type PasswdHashFunc func(model.LoginReqest) string
@@ -26,11 +30,12 @@ type PasswdHashFunc func(model.LoginReqest) string
 type Application struct {
 	accrualSystem string          // адрес системы расчёта начислений
 	storage       storage.Storage // хранилище данных
-	client        *http.Client
-	server        *http.Server   // клиент опрашивающий внешнюю систему
-	passwdHash    PasswdHashFunc // функция хеширования пароля
+	client        *http.Client    // клиент опрашивающий внешнюю систему
+	server        *http.Server    // запускаемый сервер при старте приложения
+	passwdHash    PasswdHashFunc  // функция хеширования пароля
 }
 
+// Создание экземпляра приложения
 func New(conf config.Configuration) (*Application, error) {
 
 	var a Application
@@ -74,23 +79,13 @@ func New(conf config.Configuration) (*Application, error) {
 }
 
 func (a *Application) Start() error {
+
 	// Стартуем опрос внешней системы в отдельной горутине
 	if a.accrualSystem != "" {
 		go a.startAccrualReqestAsync()
 	}
 
-	//
-	srvErr := make(chan error)
-	go func() {
-		srvErr <- a.server.ListenAndServe()
-	}()
-
-	select {
-	case err := <-srvErr:
-		return err
-	default:
-		return nil
-	}
+	return a.server.ListenAndServe()
 }
 
 // Освобождение ресурсов приложения
