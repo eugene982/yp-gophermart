@@ -7,11 +7,15 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
+	"github.com/eugene982/yp-gophermart/internal/services/clients"
+	"github.com/eugene982/yp-gophermart/internal/services/database"
+	"github.com/eugene982/yp-gophermart/internal/services/database/postgres"
+
 	"github.com/eugene982/yp-gophermart/internal/config"
 	"github.com/eugene982/yp-gophermart/internal/model"
-	"github.com/eugene982/yp-gophermart/internal/storage"
-	"github.com/eugene982/yp-gophermart/internal/storage/pgstorage"
-	"github.com/jmoiron/sqlx"
+	"github.com/eugene982/yp-gophermart/internal/utils"
 )
 
 const (
@@ -28,19 +32,14 @@ const (
 type PasswdHashFunc func(model.LoginReqest) string
 
 type Application struct {
-	accrualSystem string          // адрес системы расчёта начислений
-	storage       storage.Storage // хранилище данных
-	client        *http.Client    // клиент опрашивающий внешнюю систему
-	server        *http.Server    // запускаемый сервер при старте приложения
-	passwdHash    PasswdHashFunc  // функция хеширования пароля
+	storage database.Database // база данных, хранилище
+	server  *http.Server      // запускаемый сервер при старте приложения
 }
 
 // Создание экземпляра приложения
 func New(conf config.Configuration) (*Application, error) {
 
 	var a Application
-
-	a.accrualSystem = conf.AccrualSystemAddress
 
 	// установка соединения БД
 	if conf.DatabaseDSN == "" {
@@ -52,24 +51,30 @@ func New(conf config.Configuration) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.storage, err = pgstorage.New(db)
+
+	// Переделать !!!
+	a.storage, err = postgres.Initialize(db)
 	if err != nil {
 		return nil, err
 	}
 
 	// клиент, который опрашивает внешний ресурс
-	a.client = &http.Client{
-		Timeout: time.Second * time.Duration(conf.Timeout),
+	if conf.AccrualSystemAddress != "" {
+		err = clients.Initialize(time.Second*time.Duration(conf.Timeout),
+			conf.AccrualSystemAddress, updateOrderLimit)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	a.server = &http.Server{
 		Addr:         conf.ServAddr,
 		WriteTimeout: time.Second * time.Duration(conf.Timeout),
 		ReadTimeout:  time.Second * time.Duration(conf.Timeout),
-		Handler:      newRouter(&a),
+		Handler:      newRouter(a.storage),
 	}
 
-	a.passwdHash = func(r model.LoginReqest) string {
+	utils.PasswordHash = func(r model.LoginReqest) string {
 		h := sha256.New()
 		return fmt.Sprintf("%x",
 			h.Sum([]byte(r.Password+passwordSalt+r.Login)))
@@ -81,9 +86,7 @@ func New(conf config.Configuration) (*Application, error) {
 func (a *Application) Start() error {
 
 	// Стартуем опрос внешней системы в отдельной горутине
-	if a.accrualSystem != "" {
-		go a.startAccrualReqestAsync()
-	}
+	go clients.StartAccrualReqestAsync(a.storage, accrueReqestDuration)
 
 	return a.server.ListenAndServe()
 }

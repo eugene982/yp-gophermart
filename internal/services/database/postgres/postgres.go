@@ -1,5 +1,5 @@
 // Хранение в базе данных postres
-package pgstorage
+package postgres
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/eugene982/yp-gophermart/internal/model"
-	"github.com/eugene982/yp-gophermart/internal/storage"
+	"github.com/eugene982/yp-gophermart/internal/services/database"
 )
 
 type PgxStore struct {
@@ -22,10 +22,10 @@ type PgxStore struct {
 }
 
 // Утверждение типа, ошибка компиляции
-var _ storage.Storage = (*PgxStore)(nil)
+var _ database.Database = (*PgxStore)(nil)
 
 // Функция конструктор
-func New(db *sqlx.DB) (*PgxStore, error) {
+func Initialize(db *sqlx.DB) (*PgxStore, error) {
 	err := db.Ping()
 	if err != nil {
 		return nil, err
@@ -84,18 +84,25 @@ func (p *PgxStore) ReadUser(ctx context.Context, userID string) (res model.UserI
 }
 
 // Запись закаказа
-func (p *PgxStore) WriteOrder(ctx context.Context, data model.OrderInfo) error {
+func (p *PgxStore) WriteNewOrder(ctx context.Context, userID string, num int64) error {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	order := model.OrderInfo{
+		UserID:     userID,
+		OrderID:    num,
+		Status:     "NEW",
+		UploadedAt: time.Now(),
+	}
+
 	// добавление записи о заказе
 	query := `
 		INSERT INTO orders (user_id, order_id, status, uploaded_at) 
 		VALUES(:user_id, :order_id, :status, :uploaded_at);`
-	if _, err = tx.NamedExecContext(ctx, query, data); err != nil {
+	if _, err = tx.NamedExecContext(ctx, query, order); err != nil {
 		return errWriteConflict(err)
 	}
 	return tx.Commit()
@@ -149,8 +156,19 @@ func (p *PgxStore) ReadOrdersWithStatus(ctx context.Context, status []string, li
 	return
 }
 
+// Запись информации о списании
+func (p *PgxStore) WriteWithdraw(ctx context.Context, userID string, num int64, sum int) error {
+	return p.writeOperations(ctx, model.OperationsInfo{
+		UserID:     userID,
+		OrderID:    num,
+		Points:     sum,
+		IsAccrual:  false,
+		UploadedAt: time.Now(),
+	})
+}
+
 // Запись сведений о лояльности
-func (p *PgxStore) WriteOperations(ctx context.Context, data []model.OperationsInfo) error {
+func (p *PgxStore) writeOperations(ctx context.Context, data model.OperationsInfo) error {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -167,8 +185,16 @@ func (p *PgxStore) WriteOperations(ctx context.Context, data []model.OperationsI
 	return tx.Commit()
 }
 
+func (p *PgxStore) ReadWithdraws(ctx context.Context, userID string) ([]model.OperationsInfo, error) {
+	return p.readOperations(ctx, userID, false)
+}
+
+func (p *PgxStore) ReadAccruals(ctx context.Context, userID string) ([]model.OperationsInfo, error) {
+	return p.readOperations(ctx, userID, true)
+}
+
 // читаем данные лояльности
-func (p *PgxStore) ReadOperations(ctx context.Context, userID string, isAccrual bool) (res []model.OperationsInfo, err error) {
+func (p *PgxStore) readOperations(ctx context.Context, userID string, isAccrual bool) (res []model.OperationsInfo, err error) {
 	res = make([]model.OperationsInfo, 0)
 
 	query := `
@@ -269,7 +295,7 @@ func errWriteConflict(err error) error {
 
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgerrcode.IsIntegrityConstraintViolation(pgErr.Code) {
-		return storage.ErrWriteConflict
+		return database.ErrWriteConflict
 	}
 	return err
 }
@@ -280,7 +306,7 @@ func errNoContent(err error) error {
 	}
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return storage.ErrNoContent
+		return database.ErrNoContent
 	}
 	return err
 }
