@@ -21,26 +21,21 @@ type PgxStore struct {
 	db *sqlx.DB
 }
 
+func init() {
+	database.RegDriver(new(PgxStore))
+}
+
 // Утверждение типа, ошибка компиляции
 var _ database.Database = (*PgxStore)(nil)
 
-// Функция конструктор
-func Initialize(db *sqlx.DB) (*PgxStore, error) {
-	err := db.Ping()
-	if err != nil {
-		return nil, err
+// Функция открытия БД
+func (p *PgxStore) Open(db *sqlx.DB) error {
+
+	if err := createTablesIfNonExists(db); err != nil {
+		return err
 	}
-
-	if err = createTablesIfNonExists(db); err != nil {
-		return nil, err
-	}
-
-	// Настройка пула соединений
-	db.SetMaxOpenConns(3)
-	db.SetMaxIdleConns(3)
-	db.SetConnMaxLifetime(3 * time.Minute)
-
-	return &PgxStore{db}, nil
+	p.db = db
+	return nil
 }
 
 // Закрытие соединения

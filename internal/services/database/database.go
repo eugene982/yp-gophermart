@@ -5,8 +5,11 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/eugene982/yp-gophermart/internal/model"
+	"github.com/jmoiron/sqlx"
 )
 
 var (
@@ -15,8 +18,48 @@ var (
 	ErrDBNotInit     = errors.New("database not initialize")
 )
 
+var database Database
+
+func Open(dns string) (Database, error) {
+
+	if dns == "" {
+		return nil, fmt.Errorf("database dsn is empty")
+	}
+
+	db, err := sqlx.Open("pgx", dns)
+	if err != nil {
+		return nil, err
+	}
+	err = db.Ping()
+	if err != nil {
+		return nil, err
+	}
+
+	// Настройка пула соединений
+	db.SetMaxOpenConns(3)
+	db.SetMaxIdleConns(3)
+	db.SetConnMaxLifetime(3 * time.Minute)
+
+	if database == nil {
+		return nil, ErrDBNotInit
+	}
+
+	err = database.Open(db)
+	if err != nil {
+		return nil, err
+	}
+
+	return database, nil
+}
+
+// регистрируем подключенный драйвер
+func RegDriver(db Database) {
+	database = db
+}
+
 // Интерфейс для хранилища данных
 type Database interface {
+	Open(*sqlx.DB) error
 	Close() error
 	Ping(context.Context) error
 

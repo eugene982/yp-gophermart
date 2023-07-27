@@ -2,17 +2,14 @@ package application
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
-	"github.com/eugene982/yp-gophermart/internal/services/clients"
-	"github.com/eugene982/yp-gophermart/internal/services/database"
-	"github.com/eugene982/yp-gophermart/internal/services/database/postgres"
-
 	"github.com/eugene982/yp-gophermart/internal/config"
+	"github.com/eugene982/yp-gophermart/internal/services/clients"
+
+	"github.com/eugene982/yp-gophermart/internal/services/database"
+	_ "github.com/eugene982/yp-gophermart/internal/services/database/postgres" // чтоб init() отработал
 )
 
 const (
@@ -35,21 +32,13 @@ type Application struct {
 // Создание экземпляра приложения
 func New(conf config.Configuration) (*Application, error) {
 
-	var a Application
+	var (
+		err error
+		a   Application
+	)
 
 	// установка соединения БД
-	if conf.DatabaseDSN == "" {
-		return nil, fmt.Errorf("database dsn is empty")
-	}
-
-	var db *sqlx.DB
-	db, err := sqlx.Open("pgx", conf.DatabaseDSN)
-	if err != nil {
-		return nil, err
-	}
-
-	// Переделать !!!
-	a.storage, err = postgres.Initialize(db)
+	a.storage, err = database.Open(conf.DatabaseDSN)
 	if err != nil {
 		return nil, err
 	}
