@@ -15,27 +15,31 @@ import (
 )
 
 var (
-	client           *http.Client
-	updateOrderLimit int
-	systemAddress    string
-)
-
-var (
 	updateOrders       = []string{"NEW", "REGISTERED", "PROCESSING"}
 	errTooManyRequests = errors.New("too many requests")
 )
 
-// Инициализация клиента
-func Initialize(timeout time.Duration, address string, limit int) error {
-	if address == "" {
-		return fmt.Errorf("acrual system address is emty")
-	}
-	systemAddress = address
+type AccrualClient struct {
+	client           *http.Client
+	updateOrderLimit int
+	systemAddress    string
+	stopChan         chan struct{}
+}
 
-	client = &http.Client{
-		Timeout: timeout,
+// Инициализация клиента
+func NewAccrualClient(timeout time.Duration, address string, limit int) (*AccrualClient, error) {
+	if address == "" {
+		return nil, fmt.Errorf("acrual system address is emty")
 	}
-	return nil
+	ac := AccrualClient{
+		systemAddress:    address,
+		updateOrderLimit: limit,
+		client: &http.Client{
+			Timeout: timeout,
+		},
+	}
+
+	return &ac, nil
 }
 
 type OrdersReadWriter interface {
@@ -44,58 +48,76 @@ type OrdersReadWriter interface {
 }
 
 // Запуск опроса клиентом внешнего сервиса
-func StartAccrualReqestAsync(rw OrdersReadWriter, duration time.Duration) {
-	if client == nil {
-		return
-	}
-
+func (ac *AccrualClient) StartReqestAsync(rw OrdersReadWriter, duration time.Duration) {
+	ac.stopChan = make(chan struct{})
 	ticker := time.NewTicker(duration)
 
-	for range ticker.C { // пауза между вызовами
+	go func(tick <-chan time.Time) {
+		for { // пауза между вызовами
 
-		logger.Info("start reqest accrual", "address", systemAddress)
-		err := updateOrdersStatuses(rw)
-		logger.Info("end request accrual", "error", err)
+			select {
+			case <-ac.stopChan:
+				logger.Info("acrual client stop")
+			case <-tick:
+				logger.Info("start reqest accrual", "address", ac.systemAddress)
+				count, err := ac.updateOrdersStatuses(rw)
+				if err != nil {
+					logger.Warn("end request accrual", "error", err, "update", count)
+				} else {
+					logger.Info("end request accrual", "update", count)
+				}
+			}
+		}
+	}(ticker.C)
+}
+
+func (ac *AccrualClient) Stop() {
+	if ac.stopChan != nil {
+		ac.stopChan <- struct{}{}
 	}
 }
 
 // Опрос сервиса начисления бонусов
-func updateOrdersStatuses(rw OrdersReadWriter) error {
+func (ac *AccrualClient) updateOrdersStatuses(rw OrdersReadWriter) (int, error) {
 	ctx := context.Background()
 
-	orders, err := rw.ReadOrdersWithStatus(ctx, updateOrders, updateOrderLimit)
+	orders, err := rw.ReadOrdersWithStatus(ctx, updateOrders, ac.updateOrderLimit)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
+	var count int
 	for _, o := range orders {
-		resp, err := accrualRequestOrder(ctx, o.OrderID)
+		resp, err := ac.accrualRequestOrder(ctx, o.OrderID)
 		if err != nil {
 			if errors.Is(err, errTooManyRequests) {
 				break
 			}
-			return err
+			return count, err
 		} else if resp.Order == "" {
 			continue
 		}
 
 		o.Status = strings.ToUpper(resp.Status)
 		accrual := int(resp.Accrual * 100)
-		rw.UpdateOrderAccrual(ctx, o, accrual)
-
+		err = rw.UpdateOrderAccrual(ctx, o, accrual)
+		if err != nil {
+			return count, err
+		}
+		count++
 	}
-	return nil
+	return count, nil
 }
 
 // запрос к внешней системе по отдельному заказу
-func accrualRequestOrder(ctx context.Context, orderID int64) (res model.AccrualResponse, err error) {
+func (ac *AccrualClient) accrualRequestOrder(ctx context.Context, orderID int64) (res model.AccrualResponse, err error) {
 	select {
 	case <-ctx.Done():
 		return res, ctx.Err()
 	default:
 	}
 
-	r, err := client.Get(fmt.Sprintf("%s/api/orders/%d", systemAddress, orderID))
+	r, err := ac.client.Get(fmt.Sprintf("%s/api/orders/%d", ac.systemAddress, orderID))
 	if err != nil {
 		return
 	}

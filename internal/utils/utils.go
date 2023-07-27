@@ -7,15 +7,11 @@ import (
 	"github.com/eugene982/yp-gophermart/internal/model"
 )
 
-func init() {
-	PasswordHash = func(lr model.LoginReqest) string {
-		return lr.Password
-	}
+type HasherFunc func(model.LoginReqest) string
+
+func (f HasherFunc) Hash(r model.LoginReqest) string {
+	return f(r)
 }
-
-type PasswordHashFunc func(model.LoginReqest) string
-
-var PasswordHash PasswordHashFunc
 
 // Проверка корректности номера заказа
 func OrderNumberToInt(order string) (int64, error) {

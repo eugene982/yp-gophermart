@@ -1,6 +1,6 @@
 package database
 
-//go:generate go run github.com/vektra/mockery/v2@v2.32.0 --name=mockdb
+//go:generate go run github.com/vektra/mockery/v2@v2.32.0 --name=Database
 
 import (
 	"context"

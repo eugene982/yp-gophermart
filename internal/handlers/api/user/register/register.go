@@ -9,11 +9,10 @@ import (
 	"github.com/eugene982/yp-gophermart/internal/logger"
 	"github.com/eugene982/yp-gophermart/internal/middleware"
 	"github.com/eugene982/yp-gophermart/internal/model"
-	"github.com/eugene982/yp-gophermart/internal/utils"
 )
 
 // регистрация пользователя
-func NewRegisterHandler(writer handlers.UserWriter) http.HandlerFunc {
+func NewRegisterHandler(writer handlers.UserWriter, hasher handlers.PasswordHasher) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -42,7 +41,7 @@ func NewRegisterHandler(writer handlers.UserWriter) http.HandlerFunc {
 		// хешируем пароли чтоб не хранить их в открытом виде
 		userInfo := model.UserInfo{
 			UserID:       request.Login,
-			PasswordHash: utils.PasswordHash(request),
+			PasswordHash: hasher.Hash(request),
 		}
 
 		err = writer.WriteUser(r.Context(), userInfo)

@@ -1,6 +1,8 @@
 package application
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi"
@@ -8,7 +10,9 @@ import (
 
 	"github.com/eugene982/yp-gophermart/internal/logger"
 	"github.com/eugene982/yp-gophermart/internal/middleware"
+	"github.com/eugene982/yp-gophermart/internal/model"
 	"github.com/eugene982/yp-gophermart/internal/services/database"
+	"github.com/eugene982/yp-gophermart/internal/utils"
 
 	"github.com/eugene982/yp-gophermart/internal/handlers/api/user/balance"
 	"github.com/eugene982/yp-gophermart/internal/handlers/api/user/balance/withdraw"
@@ -18,6 +22,13 @@ import (
 	"github.com/eugene982/yp-gophermart/internal/handlers/api/user/withdrawals"
 	"github.com/eugene982/yp-gophermart/internal/handlers/ping"
 )
+
+// Хеширования паролей
+func passworsHash(r model.LoginReqest) string {
+	h := sha256.New()
+	return fmt.Sprintf("%x",
+		h.Sum([]byte(r.Password+passwordSalt+r.Login)))
+}
 
 // Возвращает роутер
 func newRouter(db database.Database) http.Handler {
@@ -30,8 +41,8 @@ func newRouter(db database.Database) http.Handler {
 	// методы доступные без авторизации
 	r.Group(func(r chi.Router) {
 		r.Get("/ping", ping.NewPingHandler(db))
-		r.Post("/api/user/register", register.NewRegisterHandler(db))
-		r.Post("/api/user/login", login.NewLoginHandler(db))
+		r.Post("/api/user/register", register.NewRegisterHandler(db, utils.HasherFunc(passworsHash)))
+		r.Post("/api/user/login", login.NewLoginHandler(db, utils.HasherFunc(passworsHash)))
 	})
 
 	// методы доступные с авторизацией

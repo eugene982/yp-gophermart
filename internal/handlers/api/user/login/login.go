@@ -9,11 +9,10 @@ import (
 	"github.com/eugene982/yp-gophermart/internal/logger"
 	"github.com/eugene982/yp-gophermart/internal/middleware"
 	"github.com/eugene982/yp-gophermart/internal/model"
-	"github.com/eugene982/yp-gophermart/internal/utils"
 )
 
 // // вход пользователя
-func NewLoginHandler(reader handlers.UserReader) http.HandlerFunc {
+func NewLoginHandler(reader handlers.UserReader, hasher handlers.PasswordHasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -51,7 +50,7 @@ func NewLoginHandler(reader handlers.UserReader) http.HandlerFunc {
 			return
 		}
 
-		if userInfo.PasswordHash != utils.PasswordHash(request) {
+		if userInfo.PasswordHash != hasher.Hash(request) {
 			logger.Info("password does not match",
 				"login", request.Login)
 			http.Error(w, "password does not match", http.StatusUnauthorized)

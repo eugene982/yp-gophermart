@@ -1,7 +1,6 @@
 package application
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,8 +13,6 @@ import (
 	"github.com/eugene982/yp-gophermart/internal/services/database/postgres"
 
 	"github.com/eugene982/yp-gophermart/internal/config"
-	"github.com/eugene982/yp-gophermart/internal/model"
-	"github.com/eugene982/yp-gophermart/internal/utils"
 )
 
 const (
@@ -29,11 +26,10 @@ const (
 	updateOrderLimit = 10
 )
 
-type PasswdHashFunc func(model.LoginReqest) string
-
 type Application struct {
-	storage database.Database // база данных, хранилище
-	server  *http.Server      // запускаемый сервер при старте приложения
+	storage database.Database      // база данных, хранилище
+	server  *http.Server           // запускаемый сервер при старте приложения
+	client  *clients.AccrualClient // клиент опроса внешней системы
 }
 
 // Создание экземпляра приложения
@@ -60,7 +56,7 @@ func New(conf config.Configuration) (*Application, error) {
 
 	// клиент, который опрашивает внешний ресурс
 	if conf.AccrualSystemAddress != "" {
-		err = clients.Initialize(time.Second*time.Duration(conf.Timeout),
+		a.client, err = clients.NewAccrualClient(time.Second*time.Duration(conf.Timeout),
 			conf.AccrualSystemAddress, updateOrderLimit)
 		if err != nil {
 			return nil, err
@@ -74,25 +70,24 @@ func New(conf config.Configuration) (*Application, error) {
 		Handler:      newRouter(a.storage),
 	}
 
-	utils.PasswordHash = func(r model.LoginReqest) string {
-		h := sha256.New()
-		return fmt.Sprintf("%x",
-			h.Sum([]byte(r.Password+passwordSalt+r.Login)))
-	}
-
 	return &a, nil
 }
 
 func (a *Application) Start() error {
-
 	// Стартуем опрос внешней системы в отдельной горутине
-	go clients.StartAccrualReqestAsync(a.storage, accrueReqestDuration)
+	if a.client != nil {
+		a.client.StartReqestAsync(a.storage, accrueReqestDuration)
+	}
 
 	return a.server.ListenAndServe()
 }
 
 // Освобождение ресурсов приложения
 func (a *Application) Close() error {
+	if a.client != nil {
+		a.client.Stop()
+	}
+
 	err := a.storage.Close()
 	if e := a.server.Close(); err != nil && e != nil && !errors.Is(err, http.ErrServerClosed) {
 		err = e

@@ -44,6 +44,10 @@ type WithdrawReader interface {
 	ReadWithdraws(ctx context.Context, userID string) ([]model.OperationsInfo, error)
 }
 
+type PasswordHasher interface {
+	Hash(model.LoginReqest) string
+}
+
 func IsWriteConflict(err error) bool {
 	if err == nil {
 		return false

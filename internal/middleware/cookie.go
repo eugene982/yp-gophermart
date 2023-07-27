@@ -35,9 +35,8 @@ func init() {
 func CookieAuth(next http.Handler) http.Handler {
 
 	fn := func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
 
-		_, claims, err := jwtauth.FromContext(ctx)
+		_, claims, err := jwtauth.FromContext(r.Context())
 		// Токен не создат, или истекло время
 		if errors.Is(err, jwtauth.ErrNoTokenFound) || errors.Is(err, jwtauth.ErrExpired) {
 			logger.Info("unauthorized", "error", err)
@@ -68,7 +67,8 @@ func CookieAuth(next http.Handler) http.Handler {
 		}
 
 		// положим идентификатор пользователя в контекст, что быстро получать
-		ru := r.WithContext(context.WithValue(ctx, contextKeyUserID, userID))
+		//ru := r.WithContext(context.WithValue(ctx, contextKeyUserID, userID))
+		ru := RequestWithUserID(r, userID)
 		logger.Info("cookie", "user_id", userID)
 
 		next.ServeHTTP(w, ru)
@@ -77,6 +77,10 @@ func CookieAuth(next http.Handler) http.Handler {
 	// запускаем через верификатор
 	return jwtauth.Verifier(tokenAuth)(
 		http.HandlerFunc(fn))
+}
+
+func RequestWithUserID(r *http.Request, userID string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), contextKeyUserID, userID))
 }
 
 // Добавление идентификатора пользователя в куки

@@ -1,168 +1,135 @@
 package orders
 
-// import (
-// 	"fmt"
-// 	"net/http"
-// 	"net/http/httptest"
-// 	"strings"
-// 	"testing"
+import (
+	"fmt"
+	"net/http/httptest"
+	"strings"
+	"testing"
 
-// 	"github.com/eugene982/yp-gophermart/internal/middleware"
-// 	"github.com/eugene982/yp-gophermart/internal/model"
-// 	"github.com/eugene982/yp-gophermart/internal/services/database"
-// 	"github.com/eugene982/yp-gophermart/internal/services/database/mocks"
-// 	"github.com/stretchr/testify/assert"
-// 	"github.com/stretchr/testify/require"
-// )
+	"github.com/eugene982/yp-gophermart/internal/middleware"
+	"github.com/eugene982/yp-gophermart/internal/model"
+	"github.com/eugene982/yp-gophermart/internal/services/database"
+	"github.com/eugene982/yp-gophermart/internal/services/database/mocks"
+	"github.com/stretchr/testify/assert"
+)
 
-// func TestAddOrder(t *testing.T) {
+func TestAddOrder(t *testing.T) {
 
-// 	type request struct {
-// 		login       string
-// 		contentType string
-// 		body        string
-// 	}
-// 	tests := []struct {
-// 		name       string
-// 		request    request
-// 		wantStatus int
-// 	}{
-// 		{
-// 			name: "add new",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"text/plain",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 202,
-// 		},
-// 		{
-// 			name: "exist",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"text/plain",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 200,
-// 		},
-// 		{
-// 			name: "bad content-type",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"application/json",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 400,
-// 		},
-// 		{
-// 			name: "unautotize",
-// 			request: request{
-// 				`{"login":"user","password":"-"}`,
-// 				"text/plain",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 401,
-// 		},
-// 		{
-// 			name: "write conflict",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"text/plain",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 409,
-// 		},
-// 		{
-// 			name: "bad order",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"text/plain",
-// 				`12345678900`,
-// 			},
-// 			wantStatus: 422,
-// 		},
-// 		{
-// 			name: "bad order",
-// 			request: request{
-// 				`{"login":"user","password":"password"}`,
-// 				"text/plain",
-// 				`12345678903`,
-// 			},
-// 			wantStatus: 500,
-// 		},
-// 	}
-// 	for _, tcase := range tests {
-// 		t.Run(tcase.name, func(t *testing.T) {
+	type request struct {
+		login       string
+		contentType string
+		body        string
+	}
+	tests := []struct {
+		name       string
+		request    request
+		wantStatus int
+	}{
+		{
+			name: "add new",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"text/plain",
+				`12345678903`,
+			},
+			wantStatus: 202,
+		},
+		{
+			name: "exist",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"text/plain",
+				`12345678903`,
+			},
+			wantStatus: 200,
+		},
+		{
+			name: "bad content-type",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"application/json",
+				`12345678903`,
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "write conflict",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"text/plain",
+				`12345678903`,
+			},
+			wantStatus: 409,
+		},
+		{
+			name: "bad order",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"text/plain",
+				`12345678900`,
+			},
+			wantStatus: 422,
+		},
+		{
+			name: "bad order",
+			request: request{
+				`{"login":"user","password":"password"}`,
+				"text/plain",
+				`12345678903`,
+			},
+			wantStatus: 500,
+		},
+	}
+	for _, tcase := range tests {
+		t.Run(tcase.name, func(t *testing.T) {
 
-// 			mockDB := mocks.NewDatabase(t)
-// 			database.DB = mockDB
+			mockDB := mocks.NewDatabase(t)
 
-// 			// auth
-// 			w := httptest.NewRecorder()
-// 			r := httptest.NewRequest("POST", "/",
-// 				strings.NewReader(tcase.request.login))
-// 			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("POST", "/",
+				strings.NewReader(tcase.request.body))
+			r.Header.Set("Content-Type", tcase.request.contentType)
 
-// 			mockDB.On("ReadUser", r.Context(), "user").
-// 				Once().
-// 				Return(model.UserInfo{UserID: "user", PasswordHash: "password"}, nil)
-// 			Login(w, r)
+			userID := "user"
+			orderID := int64(12345678903)
+			r = middleware.RequestWithUserID(r, userID)
 
-// 			resp := w.Result()
-// 			if resp.StatusCode == 401 {
-// 				require.Equal(t, tcase.wantStatus, resp.StatusCode)
-// 			} else {
-// 				require.Equal(t, 200, resp.StatusCode)
-// 			}
-// 			defer resp.Body.Close()
-// 			Cookie := w.Header().Get("Set-Cookie")
+			switch tcase.wantStatus {
+			case 200:
+				mockDB.On("WriteNewOrder", r.Context(), userID, orderID).
+					Once().
+					Return(database.ErrWriteConflict)
+				mockDB.On("ReadOrders", r.Context(), userID, orderID).
+					Return(
+						[]model.OrderInfo{{UserID: userID, OrderID: orderID}},
+						nil,
+					)
+			case 202:
+				mockDB.On("WriteNewOrder", r.Context(), userID, orderID).
+					Once().
+					Return(nil)
+			case 409:
+				mockDB.On("WriteNewOrder", r.Context(), userID, orderID).
+					Once().
+					Return(database.ErrWriteConflict)
+				mockDB.On("ReadOrders", r.Context(), userID, orderID).
+					Once().
+					Return(
+						[]model.OrderInfo{},
+						nil,
+					)
+			case 500:
+				mockDB.On("WriteNewOrder", r.Context(), userID, orderID).
+					Once().
+					Return(fmt.Errorf("mock write error"))
+			}
 
-// 			w = httptest.NewRecorder()
-// 			r = httptest.NewRequest("POST", "/",
-// 				strings.NewReader(tcase.request.body))
-// 			r.Header.Set("Content-Type", tcase.request.contentType)
-// 			r.Header.Set("Cookie", Cookie)
+			NewAddOrderHandler(mockDB).ServeHTTP(w, r)
 
-// 			middleware.CookieAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := w.Result()
+			defer resp.Body.Close()
 
-// 				switch tcase.wantStatus {
-// 				case 200:
-// 					mockDB.On("WriteNewOrder", r.Context(), "user", int64(12345678903)).
-// 						Once().
-// 						Return(database.ErrWriteConflict)
-// 					mockDB.On("ReadOrders", r.Context(), "user", int64(12345678903)).
-// 						Return(
-// 							[]model.OrderInfo{{UserID: "user", OrderID: int64(12345678903)}},
-// 							nil,
-// 						)
-// 				case 202:
-// 					mockDB.On("WriteNewOrder", r.Context(), "user", int64(12345678903)).
-// 						Once().
-// 						Return(nil)
-// 				case 409:
-// 					mockDB.On("WriteNewOrder", r.Context(), "user", int64(12345678903)).
-// 						Once().
-// 						Return(database.ErrWriteConflict)
-// 					mockDB.On("ReadOrders", r.Context(), "user", int64(12345678903)).
-// 						Once().
-// 						Return(
-// 							[]model.OrderInfo{},
-// 							nil,
-// 						)
-// 				case 500:
-// 					mockDB.On("WriteNewOrder", r.Context(), "user", int64(12345678903)).
-// 						Once().
-// 						Return(fmt.Errorf("mock write error"))
-
-// 				}
-
-// 				AddOrder(w, r)
-// 			})).ServeHTTP(w, r)
-
-// 			resp = w.Result()
-// 			defer resp.Body.Close()
-
-// 			assert.Equal(t, tcase.wantStatus, w.Code)
-// 		})
-// 	}
-// }
+			assert.Equal(t, tcase.wantStatus, w.Code)
+		})
+	}
+}
